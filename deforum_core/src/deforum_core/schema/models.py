@@ -4,14 +4,15 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 Interpolation = Literal["linear", "bezier", "catmull_rom"]
-RotationMode = Literal["euler", "quaternion", "look_at"]
 
 
 class Keyframe(BaseModel):
     t: int = Field(..., ge=0, description="Frame index")
     v: float = Field(..., description="Value at frame t")
     interp: Interpolation = Field("bezier", description="Interpolation mode")
-    # For bezier: tangents expressed as [dt, dv] in normalized segment units
+    # Bezier tangents expressed as (dt, dv) in normalized segment time units:
+    # - dt in [0..1] for out_tan, and in [-1..0] for in_tan (recommended)
+    # - dv in value units
     in_tan: Optional[Tuple[float, float]] = None
     out_tan: Optional[Tuple[float, float]] = None
 
@@ -40,11 +41,15 @@ class Channel(BaseModel):
 
 class Constraint(BaseModel):
     type: str
+    order: int = Field(0, description="Order inside constraint stack; lower executes first")
+    enabled: bool = Field(True, description="Enable/disable this constraint")
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Modifier(BaseModel):
     type: str
+    order: int = Field(0, description="Order inside modifier stack; lower executes first")
+    enabled: bool = Field(True, description="Enable/disable this modifier")
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -59,6 +64,12 @@ class Track(BaseModel):
 class NullObject(BaseModel):
     type: Literal["Null"] = "Null"
     position: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+
+class SplineObject(BaseModel):
+    type: Literal["CatmullRomSpline"] = "CatmullRomSpline"
+    points: List[Tuple[float, float, float]] = Field(default_factory=list)
+    closed: bool = False
 
 
 class ProjectMeta(BaseModel):
@@ -94,6 +105,11 @@ class Project(BaseModel):
     def _validate(self) -> "Project":
         tl = self.timeline or {}
         tl.setdefault("tracks", [])
-        tl.setdefault("objects", {"nulls": {}})
+        tl.setdefault("objects", {"nulls": {}, "splines": {}})
+        # normalize
+        if "nulls" not in tl["objects"]:
+            tl["objects"]["nulls"] = {}
+        if "splines" not in tl["objects"]:
+            tl["objects"]["splines"] = {}
         self.timeline = tl
         return self

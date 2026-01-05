@@ -1,10 +1,10 @@
-# deforum-next-core
+# deforum-next-core (v6)
 
-Python core engine for Deforum Next MVP:
-- schema (Pydantic)
-- timeline curves (linear / bezier / catmull-rom)
-- camera rig (LookAt quaternion)
-- FastAPI bridge
-- CLI
+Constraints:
+- Rail
+- FollowPath (CatmullRomSpline + BezierSpline)
+- Orbit
+- LookAtObject
 
-See root `README.md` for quickstart.
+Export:
+- `deforumx export-a1111` emits `deforum_fields`, `deforum_preset`, and `copy_paste_bundle`.

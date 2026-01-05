@@ -1,13 +1,13 @@
-# Project format (.defx)
+# Project Format (DefX)
 
-A `.defx` is a folder that contains a `project.json` validated by Pydantic.
+Top-level keys:
+- `schema_version`: string
+- `meta`: fps/frames/resolution
+- `timeline`:
+  - `objects`: splines/nulls
+  - `tracks`: camera rig track(s)
+  - `markers` (v5): optional list of `{frame:int, label:str}` used for snapping & timeline navigation.
 
-Minimum required fields:
-- `schema_version`
-- `meta` (fps, frames, resolution)
-- `timeline.tracks[]`
-
-This MVP includes the following camera channels:
-- position.x / position.y / position.z
-- target.x / target.y / target.z
-- focal_length_mm
+Snapping sources in the editor:
+- Audio beats (detected locally in the web editor)
+- Timeline markers (stored in `timeline.markers`)

@@ -1,77 +1,108 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
+import { nearestSnapFrame, Marker } from "./TimelineMarkers";
 
 type Props = {
   track: any;
-  onChange: (track: any) => void;
+  onChange: (trackPatch: any) => void;
+  snapEnabled?: boolean;
+  markers?: Marker[];
+  beats?: { frame: number }[];
+  maxFrame?: number;
 };
 
-function ensure(track: any, name: string) {
-  track.channels = track.channels ?? {};
-  if (!track.channels[name]) track.channels[name] = { keys: [] };
-  if (!track.channels[name].keys) track.channels[name].keys = [];
-}
+function deepClone<T>(v: T): T { return JSON.parse(JSON.stringify(v)); }
+function clamp(x: number, a: number, b: number) { return Math.max(a, Math.min(b, x)); }
 
-export default function KeyframeTable({ track, onChange }: Props) {
+export default function KeyframeTable({ track, onChange, snapEnabled=false, markers=[], beats=[], maxFrame=100000 }: Props) {
   const channels = track?.channels ?? {};
-  const names = ["position.x", "position.y", "position.z", "focal_length_mm"];
+  const channelNames = useMemo(() => Object.keys(channels).sort(), [channels]);
+  const [selectedChannel, setSelectedChannel] = useState(channelNames[0] ?? "");
 
-  function addKey(ch: string) {
-    const t = window.prompt("Frame (t)?", "0");
-    const v = window.prompt("Value (v)?", "0.0");
-    if (t == null || v == null) return;
-    const tt = Math.max(0, parseInt(t, 10));
-    const vv = parseFloat(v);
-    const next = JSON.parse(JSON.stringify(track));
-    ensure(next, ch);
-    next.channels[ch].keys.push({ t: tt, v: vv, interp: "bezier" });
-    next.channels[ch].keys.sort((a: any, b: any) => a.t - b.t);
-    onChange(next);
+  const keys = useMemo(() => {
+    const ch = channels?.[selectedChannel];
+    return ch?.keys ?? [];
+  }, [channels, selectedChannel]);
+
+  function setKeys(nextKeys: any[]) {
+    const patch = deepClone(track);
+    patch.channels = patch.channels ?? {};
+    patch.channels[selectedChannel] = patch.channels[selectedChannel] ?? {};
+    patch.channels[selectedChannel].keys = nextKeys;
+    onChange(patch);
   }
 
-  function delKey(ch: string, idx: number) {
-    const next = JSON.parse(JSON.stringify(track));
-    ensure(next, ch);
-    next.channels[ch].keys.splice(idx, 1);
-    onChange(next);
+  function snapFrameIfNeeded(t: number) {
+    const tt = clamp(Math.round(t), 0, maxFrame);
+    if (!snapEnabled) return tt;
+    return nearestSnapFrame(tt, markers, beats as any, maxFrame, 3);
+  }
+
+  function addKey() {
+    const t = snapFrameIfNeeded(0);
+    const next = [...keys, { t, v: 0.0, interp: "bezier" }].sort((a,b)=>a.t-b.t);
+    setKeys(next);
+  }
+
+  function removeKey(i: number) {
+    const next = keys.filter((_: any, idx: number) => idx !== i);
+    setKeys(next);
+  }
+
+  function updateKey(i: number, patch: any) {
+    const next = deepClone(keys);
+    next[i] = { ...next[i], ...patch };
+    if (patch.t !== undefined) next[i].t = snapFrameIfNeeded(patch.t);
+    next.sort((a:any,b:any)=>a.t-b.t);
+    setKeys(next);
   }
 
   return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {names.map((ch) => {
-        const keys = channels[ch]?.keys ?? [];
-        return (
-          <div key={ch} style={{ border: "1px solid #333", borderRadius: 6, padding: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-              <div style={{ fontWeight: 600 }}>{ch}</div>
-              <button onClick={() => addKey(ch)}>+ Key</button>
-            </div>
-            {keys.length === 0 ? (
-              <div style={{ fontSize: 12, opacity: 0.75 }}>No keys</div>
-            ) : (
-              <table style={{ width: "100%", fontSize: 12 }}>
-                <thead>
-                  <tr>
-                    <th align="left">t</th>
-                    <th align="left">v</th>
-                    <th align="left">interp</th>
-                    <th></th>
+    <div style={{ border: "1px solid #333", borderRadius: 6, padding: 10, display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label style={{ fontSize: 12, opacity: 0.85 }}>Channel</label>
+        <select value={selectedChannel} onChange={(e) => setSelectedChannel(e.target.value)} style={{ flex: 1 }}>
+          {channelNames.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <button onClick={addKey} disabled={!selectedChannel}>Add key</button>
+      </div>
+
+      {selectedChannel ? (
+        <div style={{ maxHeight: 220, overflow: "auto", border: "1px solid #222", borderRadius: 6, padding: 6 }}>
+          {keys.length ? (
+            <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left", opacity: 0.85 }}>
+                  <th>t</th><th>v</th><th>interp</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map((k: any, i: number) => (
+                  <tr key={i}>
+                    <td><input type="number" value={k.t} onChange={(e) => updateKey(i, { t: parseInt(e.target.value, 10) || 0 })} style={{ width: 90 }} /></td>
+                    <td><input type="number" value={k.v} onChange={(e) => updateKey(i, { v: parseFloat(e.target.value) || 0 })} style={{ width: 120 }} /></td>
+                    <td>
+                      <select value={k.interp ?? "bezier"} onChange={(e) => updateKey(i, { interp: e.target.value })}>
+                        <option value="bezier">bezier</option>
+                        <option value="linear">linear</option>
+                        <option value="hold">hold</option>
+                      </select>
+                    </td>
+                    <td><button onClick={() => removeKey(i)}>del</button></td>
                   </tr>
-                </thead>
-                <tbody>
-                  {keys.map((k: any, idx: number) => (
-                    <tr key={idx}>
-                      <td>{k.t}</td>
-                      <td>{k.v}</td>
-                      <td>{k.interp}</td>
-                      <td align="right"><button onClick={() => delKey(ch, idx)}>Del</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        );
-      })}
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ fontSize: 12, opacity: 0.75 }}>No keyframes.</div>
+          )}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, opacity: 0.75 }}>No channels found.</div>
+      )}
+
+      <div style={{ fontSize: 12, opacity: 0.7 }}>
+        Snapping uses beats + markers within ±3 frames (MVP).
+      </div>
     </div>
   );
 }

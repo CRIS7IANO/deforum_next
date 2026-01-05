@@ -1,0 +1,2 @@
+[console_scripts]
+deforumx = deforum_core.cli.deforumx:app

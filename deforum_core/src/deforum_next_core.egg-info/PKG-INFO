@@ -1,0 +1,30 @@
+Metadata-Version: 2.4
+Name: deforum-next-core
+Version: 0.1.1
+Summary: Deforum Next core engine (MVP): timeline curves, camera rig, FastAPI bridge, CLI.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.6
+Requires-Dist: pydantic-settings>=2.2
+Requires-Dist: numpy>=1.26
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn[standard]>=0.27
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Requires-Dist: python-multipart>=0.0.9
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: ruff>=0.5; extra == "dev"
+Requires-Dist: mypy>=1.8; extra == "dev"
+Requires-Dist: httpx>=0.27; extra == "dev"
+
+# deforum-next-core
+
+Python core engine for Deforum Next MVP:
+- schema (Pydantic)
+- timeline curves (linear / bezier / catmull-rom)
+- camera rig (LookAt quaternion)
+- FastAPI bridge
+- CLI
+
+See root `README.md` for quickstart.

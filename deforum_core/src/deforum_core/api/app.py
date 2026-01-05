@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from deforum_core.camera.rig import eval_camera
+from deforum_core.camera.rig import eval_camera, eval_camera_range
 from deforum_core.schema.models import Project
 
 
@@ -56,9 +56,8 @@ def _save_project(path: str, project: Project) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Deforum Next Bridge (MVP)", version="0.1.1")
+    app = FastAPI(title="Deforum Next Bridge (v6)", version="0.6.0")
 
-    # CORS for local editor dev (Vite)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -134,9 +133,11 @@ def create_app() -> FastAPI:
 
             start = max(0, int(req.start))
             end = max(start, int(req.end))
+
+            cams = eval_camera_range(project, start=start, end=end)
+
             frames: List[Dict[str, Any]] = []
-            for f in range(start, end + 1):
-                cam = eval_camera(project, f)
+            for cam in cams:
                 frames.append({
                     "frame": cam.frame,
                     "position": cam.position,

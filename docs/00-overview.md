@@ -1,9 +1,11 @@
-# Overview
+# Overview (v3)
 
-This repository is a functional MVP for Deforum Next:
-- timeline curve evaluation
-- camera rig evaluation
-- FastAPI bridge
-- Web editor with Three.js viewport
+Deforum Next is structured as:
+- **deforum_core/**: pure Python engine (timeline + camera + constraints/modifiers) + FastAPI bridge + CLI + exporters.
+- **web_editor/**: React/Three.js authoring tool (3D preview + keyframes + graph editor + beat grid).
+- **a1111_extension/**: placeholder extension that demonstrates how the WebUI integration could load `.defx` projects.
 
-See root README for quickstart.
+v3 focus:
+- camera authoring power (graph editor, time-warped bezier, constraints/modifiers)
+- deterministic evaluation for reproducible renders
+- exporters to downstream pipelines (A1111 Deforum schedules, Comfy bundles)

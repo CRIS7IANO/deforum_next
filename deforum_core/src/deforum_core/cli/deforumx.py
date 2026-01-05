@@ -10,8 +10,9 @@ from rich.console import Console
 from rich.table import Table
 
 from deforum_core.api.app import create_app
-from deforum_core.camera.rig import eval_camera
+from deforum_core.camera.rig import eval_camera, eval_camera_range
 from deforum_core.schema.models import Project
+from deforum_core.cli.exporters import export_a1111_bundle, export_comfy_bundle
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -59,14 +60,61 @@ def export_camera_csv(
     end_frame = pr.meta.frames - 1 if end is None else min(end, pr.meta.frames - 1)
     start_frame = max(0, start)
 
+    cams = eval_camera_range(pr, start=start_frame, end=end_frame)
+
     with out_path.open("w", newline="", encoding="utf-8") as f:
         cw = csv.writer(f)
         cw.writerow(["frame", "x", "y", "z", "tx", "ty", "tz", "qw", "qx", "qy", "qz", "focal_mm"])
-        for fr in range(start_frame, end_frame + 1):
-            cam = eval_camera(pr, fr)
+        for cam in cams:
             tx, ty, tz = cam.target if cam.target else (0.0, 0.0, 0.0)
-            cw.writerow([fr, *cam.position, tx, ty, tz, cam.rotation.w, cam.rotation.x, cam.rotation.y, cam.rotation.z, cam.focal_length_mm])
+            cw.writerow([cam.frame, *cam.position, tx, ty, tz, cam.rotation.w, cam.rotation.x, cam.rotation.y, cam.rotation.z, cam.focal_length_mm])
 
+    console.print(f"[green]Wrote[/green] {out_path}")
+
+@app.command("export-a1111")
+def export_a1111(
+    project: str,
+    out: str = "exports/a1111_pack.json",
+    start: int = 0,
+    end: Optional[int] = None,
+) -> None:
+    pr = _load_project(project)
+    base = Path(project) if Path(project).is_dir() else Path(project).parent
+    out_path = (base / out).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    end_frame = pr.meta.frames - 1 if end is None else min(end, pr.meta.frames - 1)
+    start_frame = max(0, start)
+
+    bundle = export_a1111_bundle(pr, start=start_frame, end=end_frame)
+    out_path.write_text(json.dumps({
+        "meta": bundle.meta,
+        "schedules": bundle.schedules,
+        "camera_csv": bundle.camera_csv,
+        "deforum_preset": bundle.deforum_preset,
+        "deforum_fields": bundle.deforum_fields,
+        "copy_paste_bundle": bundle.copy_paste_bundle
+    }, indent=2), encoding="utf-8")
+    console.print(f"[green]Wrote[/green] {out_path}")
+
+
+@app.command("export-comfyui")
+def export_comfyui(
+    project: str,
+    out: str = "exports/comfy_bundle.json",
+    start: int = 0,
+    end: Optional[int] = None,
+) -> None:
+    pr = _load_project(project)
+    base = Path(project) if Path(project).is_dir() else Path(project).parent
+    out_path = (base / out).resolve()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    end_frame = pr.meta.frames - 1 if end is None else min(end, pr.meta.frames - 1)
+    start_frame = max(0, start)
+
+    bundle = export_comfy_bundle(pr, start=start_frame, end=end_frame)
+    out_path.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
     console.print(f"[green]Wrote[/green] {out_path}")
 
 

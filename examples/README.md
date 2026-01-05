@@ -1,3 +1,3 @@
 # Examples
 
-- `project.defx/` — a simple camera path + lens example.
+- `project.defx/` — rail spline + aim spring + time-warped bezier tangents.

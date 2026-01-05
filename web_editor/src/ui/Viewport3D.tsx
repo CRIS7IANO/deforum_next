@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
-type Props = { rangeData: any };
+type Props = { rangeData: any; frame: number; project?: any };
 
 function makeFrustumLines(fovDeg: number, aspect: number, near: number, far: number) {
   const fov = (fovDeg * Math.PI) / 180;
@@ -39,13 +39,15 @@ function makeFrustumLines(fovDeg: number, aspect: number, near: number, far: num
   return new THREE.LineSegments(geom, mat);
 }
 
-export default function Viewport3D({ rangeData }: Props) {
+export default function Viewport3D({ rangeData, frame, project }: Props) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const camRef = useRef<THREE.PerspectiveCamera | null>(null);
   const pathLineRef = useRef<THREE.Line | null>(null);
+  const railLineRef = useRef<THREE.Line | null>(null);
   const frustumRef = useRef<THREE.Object3D | null>(null);
+  const targetRef = useRef<THREE.Mesh | null>(null);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -78,6 +80,12 @@ export default function Viewport3D({ rangeData }: Props) {
     frustumRef.current = frustum;
     scene.add(frustum);
 
+    const targetGeom = new THREE.SphereGeometry(0.07, 16, 16);
+    const targetMat = new THREE.MeshStandardMaterial({ color: 0xffcc66 });
+    const targetMesh = new THREE.Mesh(targetGeom, targetMat);
+    targetRef.current = targetMesh;
+    scene.add(targetMesh);
+
     const onResize = () => {
       if (!mountRef.current || !rendererRef.current || !camRef.current) return;
       const w = mountRef.current.clientWidth;
@@ -103,6 +111,30 @@ export default function Viewport3D({ rangeData }: Props) {
     };
   }, []);
 
+  // draw rail spline (if any)
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (railLineRef.current) {
+      scene.remove(railLineRef.current);
+      railLineRef.current.geometry.dispose();
+      (railLineRef.current.material as THREE.Material).dispose();
+      railLineRef.current = null;
+    }
+
+    const sp = project?.timeline?.objects?.splines?.dolly_spline_A;
+    if (!sp?.points?.length) return;
+
+    const pts = sp.points.map((p: number[]) => new THREE.Vector3(p[0], p[1], p[2]));
+    const geom = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: 0x44ff88 });
+    const line = new THREE.Line(geom, mat);
+    railLineRef.current = line;
+    scene.add(line);
+  }, [project]);
+
+  // draw evaluated path
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -123,15 +155,27 @@ export default function Viewport3D({ rangeData }: Props) {
     const line = new THREE.Line(geom, mat);
     pathLineRef.current = line;
     scene.add(line);
+  }, [rangeData]);
 
-    const last = frames[frames.length - 1];
+  // update frustum and target for selected frame
+  useEffect(() => {
+    const frames = rangeData?.frames ?? [];
+    if (!frames.length) return;
+
+    const idx = Math.max(0, Math.min(frames.length - 1, frame));
+    const f = frames[idx];
     const frustum = frustumRef.current;
+    const target = targetRef.current;
     if (frustum) {
-      frustum.position.set(last.position[0], last.position[1], last.position[2]);
-      const tgt = last.target ?? [0, 1.5, 0];
+      frustum.position.set(f.position[0], f.position[1], f.position[2]);
+      const tgt = f.target ?? [0, 1.5, 0];
       frustum.lookAt(tgt[0], tgt[1], tgt[2]);
     }
-  }, [rangeData]);
+    if (target) {
+      const tgt = f.target ?? [0, 1.5, 0];
+      target.position.set(tgt[0], tgt[1], tgt[2]);
+    }
+  }, [rangeData, frame]);
 
   return <div ref={mountRef} style={{ width: "100%", height: "100%" }} />;
 }

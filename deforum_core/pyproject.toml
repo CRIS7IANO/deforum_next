@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deforum-next-core"
-version = "0.1.1"
-description = "Deforum Next core engine (MVP): timeline curves, camera rig, FastAPI bridge, CLI."
+version = "0.6.0"
+description = "Deforum Next core engine: timeline curves, camera rig, constraints/modifiers, FastAPI bridge, CLI."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -42,6 +42,6 @@ target-version = "py310"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "0.6.0"
 warn_return_any = true
 warn_unused_configs = true

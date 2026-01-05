@@ -6,8 +6,12 @@ from typing import List, Tuple
 from deforum_core.schema.models import Keyframe
 
 
+def _clamp(x: float, a: float, b: float) -> float:
+    return float(max(a, min(b, x)))
+
+
 def _clamp01(x: float) -> float:
-    return float(max(0.0, min(1.0, x)))
+    return _clamp(x, 0.0, 1.0)
 
 
 def linear(u: float, a: float, b: float) -> float:
@@ -20,7 +24,7 @@ class BezierHandle:
     dv: float
 
 
-def bezier_segment(u: float, p0: float, p1: float, p2: float, p3: float) -> float:
+def bezier_cubic(u: float, p0: float, p1: float, p2: float, p3: float) -> float:
     return (
         (1 - u) ** 3 * p0
         + 3 * (1 - u) ** 2 * u * p1
@@ -41,7 +45,7 @@ def catmull_rom(u: float, p0: float, p1: float, p2: float, p3: float) -> float:
 
 
 def _ensure_handles(k0: Keyframe, k1: Keyframe) -> Tuple[BezierHandle, BezierHandle]:
-    # Default tangents approximate a smooth ramp.
+    # Defaults: dt = 0.33 for out, -0.33 for in; dv proportional.
     if k0.out_tan is None:
         out_h = BezierHandle(dt=0.33, dv=(k1.v - k0.v) * 0.33)
     else:
@@ -53,6 +57,23 @@ def _ensure_handles(k0: Keyframe, k1: Keyframe) -> Tuple[BezierHandle, BezierHan
         in_h = BezierHandle(dt=float(k1.in_tan[0]), dv=float(k1.in_tan[1]))
 
     return out_h, in_h
+
+
+def _solve_bezier_time(u: float, x1: float, x2: float, iters: int = 24) -> float:
+    # Solve x(s)=u for s in [0,1] using bisection.
+    # x(s) is cubic bezier from 0..1 with control points x1, x2.
+    u = _clamp01(u)
+    x1 = _clamp01(x1)
+    x2 = _clamp01(x2)
+    lo, hi = 0.0, 1.0
+    for _ in range(iters):
+        mid = (lo + hi) * 0.5
+        x = bezier_cubic(mid, 0.0, x1, x2, 1.0)
+        if x < u:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) * 0.5
 
 
 def eval_keyframes(keys: List[Keyframe], t: int, default: float = 0.0) -> float:
@@ -86,10 +107,15 @@ def eval_keyframes(keys: List[Keyframe], t: int, default: float = 0.0) -> float:
 
     if interp == "bezier":
         out_h, in_h = _ensure_handles(k0, k1)
-        p0, p3 = float(k0.v), float(k1.v)
-        p1 = p0 + float(out_h.dv)
-        p2 = p3 + float(in_h.dv)
-        return float(bezier_segment(u, p0, p1, p2, p3))
+        # Time-warped: x control points are driven by dt handles.
+        # y control points are v + dv handles (absolute value units).
+        x1 = _clamp01(float(out_h.dt))
+        x2 = _clamp01(1.0 + float(in_h.dt))  # in dt is typically negative
+        s = _solve_bezier_time(u, x1=x1, x2=x2)
+        y0, y3 = float(k0.v), float(k1.v)
+        y1 = y0 + float(out_h.dv)
+        y2 = y3 + float(in_h.dv)
+        return float(bezier_cubic(s, y0, y1, y2, y3))
 
     if interp == "catmull_rom":
         p1, p2 = float(k0.v), float(k1.v)
@@ -97,5 +123,4 @@ def eval_keyframes(keys: List[Keyframe], t: int, default: float = 0.0) -> float:
         p3 = float(keys[i1 + 1].v) if i1 + 1 < len(keys) else p2
         return float(catmull_rom(u, p0, p1, p2, p3))
 
-    # fallback
     return float(linear(u, k0.v, k1.v))
