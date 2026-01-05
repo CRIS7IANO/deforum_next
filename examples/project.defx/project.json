@@ -1,0 +1,140 @@
+{
+  "schema_version": "2.0",
+  "meta": {
+    "name": "MVP_Camera_Path",
+    "fps": 24,
+    "frames": 120,
+    "resolution": [
+      576,
+      1024
+    ]
+  },
+  "assets": {},
+  "timeline": {
+    "tracks": [
+      {
+        "id": "camera.transform",
+        "type": "CameraTransformTrack",
+        "channels": {
+          "position.x": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.0,
+                "interp": "bezier",
+                "out_tan": [
+                  0.33,
+                  0.0
+                ]
+              },
+              {
+                "t": 60,
+                "v": 2.0,
+                "interp": "bezier",
+                "in_tan": [
+                  -0.33,
+                  0.0
+                ]
+              },
+              {
+                "t": 119,
+                "v": 0.0,
+                "interp": "bezier"
+              }
+            ]
+          },
+          "position.y": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 1.5,
+                "interp": "linear"
+              },
+              {
+                "t": 119,
+                "v": 1.7,
+                "interp": "linear"
+              }
+            ]
+          },
+          "position.z": {
+            "keys": [
+              {
+                "t": 0,
+                "v": -6.0,
+                "interp": "catmull_rom"
+              },
+              {
+                "t": 40,
+                "v": -3.5,
+                "interp": "catmull_rom"
+              },
+              {
+                "t": 80,
+                "v": -2.5,
+                "interp": "catmull_rom"
+              },
+              {
+                "t": 119,
+                "v": -5.0,
+                "interp": "catmull_rom"
+              }
+            ]
+          },
+          "target.x": {
+            "value": 0.0
+          },
+          "target.y": {
+            "value": 1.5
+          },
+          "target.z": {
+            "value": 0.0
+          },
+          "focal_length_mm": {
+            "keys": [
+              {
+                "t": 0,
+                "v": 35,
+                "interp": "bezier"
+              },
+              {
+                "t": 119,
+                "v": 50,
+                "interp": "bezier"
+              }
+            ]
+          }
+        },
+        "constraints": [],
+        "modifiers": []
+      }
+    ],
+    "objects": {
+      "nulls": {
+        "hero": {
+          "type": "Null",
+          "position": [
+            0,
+            1.5,
+            0
+          ]
+        }
+      }
+    }
+  },
+  "render": {
+    "backend": "headless",
+    "sampler": "DPM++ 2M Karras",
+    "steps": 28,
+    "cfg": 6.5,
+    "seed_mode": {
+      "type": "per_frame",
+      "base_seed": 12345,
+      "jitter": 0
+    },
+    "prompts": {
+      "positive": "cinematic scene",
+      "negative": "artifacts"
+    }
+  }
+}
