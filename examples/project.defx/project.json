@@ -228,6 +228,32 @@
                 "interp": "bezier"
               }
             ]
+          },
+          "roll_deg": {
+            "value": 0.0,
+            "keys": [
+              {
+                "t": 0,
+                "v": 0.0,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 6.0,
+                "interp": "bezier",
+                "ease": [
+                  0.42,
+                  0,
+                  0.58,
+                  1
+                ]
+              },
+              {
+                "t": 179,
+                "v": 0.0,
+                "interp": "bezier"
+              }
+            ]
           }
         },
         "constraints": [
@@ -320,6 +346,52 @@
             "params": {}
           }
         ]
+      },
+      {
+        "id": "camera.lens",
+        "type": "track",
+        "channels": {
+          "aperture_f": {
+            "value": 2.8,
+            "keys": [
+              {
+                "t": 0,
+                "v": 2.8,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 1.8,
+                "interp": "linear"
+              },
+              {
+                "t": 179,
+                "v": 2.8,
+                "interp": "linear"
+              }
+            ]
+          },
+          "focus_distance_m": {
+            "value": 10.0,
+            "keys": [
+              {
+                "t": 0,
+                "v": 10.0,
+                "interp": "linear"
+              },
+              {
+                "t": 90,
+                "v": 4.0,
+                "interp": "linear"
+              },
+              {
+                "t": 179,
+                "v": 12.0,
+                "interp": "linear"
+              }
+            ]
+          }
+        }
       }
     ],
     "markers": [
@@ -338,8 +410,102 @@
       {
         "frame": 144,
         "label": "climax"
+      },
+      {
+        "frame": 60,
+        "label": "cut"
+      },
+      {
+        "frame": 120,
+        "label": "cut"
       }
-    ]
+    ],
+    "shots": [
+      {
+        "start": 0,
+        "end": 60,
+        "render_overrides": {
+          "cfg": 6.5,
+          "steps": 30
+        },
+        "prompt_override": "a cinematic shot of a neon las vegas street, rain, reflections",
+        "negative_prompt_override": "text, watermark, extra limbs, deformed",
+        "seed_override": 123456,
+        "prompt_layers": [
+          "slow dolly-in",
+          "wet asphalt reflections",
+          "neon cyan/magenta bokeh"
+        ],
+        "style_layers": [
+          "ultra-cinematic",
+          "high dynamic range",
+          "clean edges",
+          "film grain"
+        ],
+        "negative_layers": [
+          "text",
+          "watermark",
+          "extra limbs",
+          "deformed hands"
+        ],
+        "camera_constraints_override": {
+          "enabled": true,
+          "max_speed_pos": 1.0,
+          "max_accel_pos": 0.25,
+          "max_speed_target": 1.0,
+          "max_accel_target": 0.25,
+          "max_speed_roll_deg": 2.0,
+          "max_speed_focal_mm": 1.0,
+          "smoothing_window": 3,
+          "sample_step": 1
+        }
+      },
+      {
+        "start": 60,
+        "end": 120,
+        "render_overrides": {
+          "cfg": 7.5,
+          "steps": 36
+        }
+      },
+      {
+        "start": 120,
+        "end": 179,
+        "render_overrides": {
+          "cfg": 5.5,
+          "steps": 28
+        }
+      }
+    ],
+    "cuts": [
+      {
+        "frame": 60,
+        "transition": "hard",
+        "duration_frames": 0
+      },
+      {
+        "frame": 120,
+        "transition": "dissolve",
+        "duration_frames": 12,
+        "curve": [
+          0.42,
+          0.0,
+          0.58,
+          1.0
+        ]
+      }
+    ],
+    "camera_constraints": {
+      "enabled": true,
+      "max_speed_pos": 1.5,
+      "max_accel_pos": 0.4,
+      "max_speed_target": 1.5,
+      "max_accel_target": 0.4,
+      "max_speed_roll_deg": 4.0,
+      "max_speed_fov_deg": 1.5,
+      "smoothing_window": 3,
+      "sample_step": 1
+    }
   },
   "render": {
     "backend": "headless",
