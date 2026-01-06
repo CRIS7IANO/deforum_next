@@ -10,7 +10,7 @@ Vec3 = Tuple[float, float, float]
 
 
 def _get_objects(project: Project) -> Dict[str, Any]:
-    tl = project.timeline or {}
+    tl = project.timeline
     return tl.get("objects", {}) or {}
 
 

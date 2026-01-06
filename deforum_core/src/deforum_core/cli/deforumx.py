@@ -12,7 +12,7 @@ from rich.table import Table
 from deforum_core.api.app import create_app
 from deforum_core.camera.rig import eval_camera, eval_camera_range
 from deforum_core.schema.models import Project
-from deforum_core.cli.exporters import export_a1111_bundle, export_comfy_bundle
+from deforum_core.cli.exporters import export_a1111_bundle, export_comfy_bundle, export_a1111_shots
 
 app = typer.Typer(add_completion=False)
 console = Console()
@@ -42,6 +42,19 @@ def validate(project: str) -> None:
     t.add_row("resolution", f"{meta.resolution[0]}x{meta.resolution[1]}")
     t.add_row("schema_version", pr.schema_version)
     console.print(t)
+    # Check shot override keys (non-fatal)
+allowed = {"sampler", "steps", "cfg", "seed_mode", "prompts", "negative_prompts"}
+warns = []
+for s in getattr(pr.timeline, "shots", []) if getattr(pr, "timeline", None) else []:
+    ov = getattr(s, "render_overrides", {}) or {}
+    for k in ov.keys():
+        if k not in allowed:
+            warns.append(f"Unknown override key in shot [{s.start}-{s.end}]: {k}")
+if warns:
+    console.print("[yellow]Warnings[/yellow]")
+    for wmsg in sorted(set(warns)):
+        console.print(" - " + wmsg)
+
     console.print("[green]OK[/green]")
 
 
@@ -51,6 +64,9 @@ def export_camera_csv(
     out: str = "exports/camera.csv",
     start: int = 0,
     end: Optional[int] = None,
+    compact: bool = True,
+    tolerance: float = 0.02,
+    max_points: int = 220,
 ) -> None:
     pr = _load_project(project)
     base = Path(project) if Path(project).is_dir() else Path(project).parent
@@ -77,6 +93,9 @@ def export_a1111(
     out: str = "exports/a1111_pack.json",
     start: int = 0,
     end: Optional[int] = None,
+    compact: bool = True,
+    tolerance: float = 0.02,
+    max_points: int = 220,
 ) -> None:
     pr = _load_project(project)
     base = Path(project) if Path(project).is_dir() else Path(project).parent
@@ -86,7 +105,7 @@ def export_a1111(
     end_frame = pr.meta.frames - 1 if end is None else min(end, pr.meta.frames - 1)
     start_frame = max(0, start)
 
-    bundle = export_a1111_bundle(pr, start=start_frame, end=end_frame)
+    bundle = export_a1111_bundle(pr, start=start_frame, end=end_frame, compact=compact, tolerance=tolerance, max_points=max_points)
     out_path.write_text(json.dumps({
         "meta": bundle.meta,
         "schedules": bundle.schedules,
@@ -104,6 +123,9 @@ def export_comfyui(
     out: str = "exports/comfy_bundle.json",
     start: int = 0,
     end: Optional[int] = None,
+    compact: bool = True,
+    tolerance: float = 0.02,
+    max_points: int = 220,
 ) -> None:
     pr = _load_project(project)
     base = Path(project) if Path(project).is_dir() else Path(project).parent
@@ -127,3 +149,22 @@ def serve(project: str, host: str = "127.0.0.1", port: int = 8787) -> None:
     console.print(f"Serving bridge on http://{host}:{port}")
     console.print(f"Project path: {project}")
     uvicorn.run(app_, host=host, port=port, log_level="info")
+
+
+@app.command("export-a1111-shots")
+def export_a1111_shots_cmd(
+    project_path: str = typer.Argument(..., help="Path to .defx project folder"),
+    out: str = typer.Option(..., "--out", help="Output JSON path"),
+    start: Optional[int] = typer.Option(None, "--start", help="Start frame"),
+    end: Optional[int] = typer.Option(None, "--end", help="End frame"),
+    compact: bool = typer.Option(True, "--compact/--no-compact", help="Compact schedule using RDP"),
+    tolerance: float = typer.Option(0.02, "--tolerance", help="RDP tolerance (higher=fewer points)"),
+    max_points: int = typer.Option(220, "--max-points", help="Max points per channel schedule"),
+):
+    pr = load_project(project_path)
+    start_frame = 0 if start is None else int(start)
+    end_frame = (pr.meta.frames - 1) if end is None else int(end)
+    data = export_a1111_shots(pr, start=start_frame, end=end_frame, compact=compact, tolerance=tolerance, max_points=max_points)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    typer.echo(f"Wrote {out} (shots={data['meta']['shot_count']})")

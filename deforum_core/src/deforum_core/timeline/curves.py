@@ -76,6 +76,13 @@ def _solve_bezier_time(u: float, x1: float, x2: float, iters: int = 24) -> float
     return (lo + hi) * 0.5
 
 
+def _ease_cubic(u: float, p1x: float, p1y: float, p2x: float, p2y: float) -> float:
+    """Cubic-bezier easing: solve x(s)=u, return y(s)."""
+    u = _clamp01(u)
+    s = _solve_bezier_time(u, x1=_clamp01(p1x), x2=_clamp01(p2x))
+    return float(bezier_cubic(s, 0.0, _clamp01(p1y), _clamp01(p2y), 1.0))
+
+
 def eval_keyframes(keys: List[Keyframe], t: int, default: float = 0.0) -> float:
     if not keys:
         return default
@@ -99,6 +106,14 @@ def eval_keyframes(keys: List[Keyframe], t: int, default: float = 0.0) -> float:
     k0, k1 = keys[i0], keys[i1]
     span = max(1, (k1.t - k0.t))
     u = _clamp01((t - k0.t) / span)
+
+    # Optional easing on segment time
+    if getattr(k1, 'ease', None) is not None:
+        try:
+            p1x, p1y, p2x, p2y = k1.ease
+            u = _ease_cubic(u, p1x, p1y, p2x, p2y)
+        except Exception:
+            pass
 
     interp = k1.interp
 

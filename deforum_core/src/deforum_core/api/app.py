@@ -8,7 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from deforum_core.camera.rig import eval_camera, eval_camera_range
+from deforum_core.camera.rig import eval_camera
+from deforum_core.camera.bake import sample_camera, apply_constraints, eval_camera_range
 from deforum_core.schema.models import Project
 
 
@@ -56,7 +57,7 @@ def _save_project(path: str, project: Project) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Deforum Next Bridge (v6)", version="0.6.0")
+    app = FastAPI(title="Deforum Next Bridge (v18.1)", version="0.18.1")
 
     app.add_middleware(
         CORSMiddleware,
@@ -152,3 +153,21 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=400, detail=str(e))
 
     return app
+
+@app.get("/camera_path")
+def camera_path(start: int = 0, end: int = 179, apply: bool = True):
+    pr = state.project
+    end = min(int(end), int(pr.meta.frames) - 1)
+    start = max(0, int(start))
+    cc = getattr(getattr(pr, "timeline", None), "camera_constraints", None)
+    step = int(getattr(cc, "sample_step", 1) or 1) if cc else 1
+    samples = sample_camera(pr, start, end, step=step)
+    if apply and cc and getattr(cc, "enabled", False):
+        samples = apply_constraints(samples, cc)
+    return {
+        "meta": {"start": start, "end": end, "step": step, "constraints": cc.model_dump() if cc else None},
+        "samples": [
+            {"frame": s.frame, "pos": list(s.pos), "target": list(s.target), "euler_deg": list(s.euler_deg), "focal_length_mm": s.focal_length_mm}
+            for s in samples
+        ],
+    }

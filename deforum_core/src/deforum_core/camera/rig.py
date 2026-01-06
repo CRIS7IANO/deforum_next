@@ -7,7 +7,7 @@ import math
 from deforum_core.camera.math3d import Quaternion, look_at_rotation, v3
 from deforum_core.camera.constraints import rail_position, orbit_position, lookup_null
 from deforum_core.camera.modifiers import aim_spring_apply, noise_shake_apply, dolly_zoom_focal
-from deforum_core.camera.euler import lock_roll
+from deforum_core.camera.euler import lock_roll, quat_to_euler_xyz_deg, euler_xyz_deg_to_quat
 from deforum_core.schema.models import Project, Track
 from deforum_core.timeline.evaluator import build_tracks, eval_track
 
@@ -79,7 +79,16 @@ def _apply_constraints(
     return pos, target
 
 
+def _apply_roll_deg(rot, roll_deg: float):
+    try:
+        rx, ry, rz = quat_to_euler_xyz_deg(rot)
+        return euler_xyz_deg_to_quat(rx + float(roll_deg), ry, rz)
+    except Exception:
+        return rot
+
+
 def eval_camera(project: Project, frame: int) -> CameraState:
+
     tracks = build_tracks(project)
     cam_track = tracks[0] if tracks else Track(id="camera.transform", type="CameraTransformTrack")
     vals = eval_track(cam_track, frame)
@@ -93,6 +102,10 @@ def eval_camera(project: Project, frame: int) -> CameraState:
     pos, target = _apply_constraints(project, cam_track, vals, pos_ch, tgt_ch)
 
     rot = look_at_rotation(v3(*pos), v3(*target))
+    # Optional roll channel (degrees): roll_deg
+    roll = _get(vals, "roll_deg", 0.0)
+    if abs(float(roll)) > 1e-9:
+        rot = _apply_roll_deg(rot, float(roll))
     # HorizonLock is applied as a modifier in range eval; single-frame eval keeps base look-at.
     focal = _get(vals, "focal_length_mm", 35.0)
     focus = _get(vals, "focus_distance_m", 2.8)
@@ -187,6 +200,9 @@ def eval_camera_range(project: Project, start: int, end: int) -> List[CameraStat
         pos = positions[i]
         tgt = targets[i]
         rot = look_at_rotation(v3(*pos), v3(*tgt))
+        roll = _get(vals, "roll_deg", 0.0)
+        if abs(float(roll)) > 1e-9:
+            rot = _apply_roll_deg(rot, float(roll))
         if hlock_enabled:
             rot = lock_roll(rot)
         out.append(CameraState(

@@ -29,6 +29,6 @@ def eval_tracks(tracks: List[Track], frame: int) -> Dict[str, float]:
 
 
 def build_tracks(project: Project) -> List[Track]:
-    tl = project.timeline or {}
-    raw_tracks = tl.get("tracks", [])
-    return [Track.model_validate(rt) for rt in raw_tracks]
+    tl = project.timeline
+    raw_tracks = getattr(tl, 'tracks', []) if tl is not None else []
+    return [Track.model_validate(rt) if not isinstance(rt, Track) else rt for rt in raw_tracks]
