@@ -1,12 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { evalRange } from "../engine_bridge/api";
 import Viewport3D from "./Viewport3D";
+import CutsEditor from "./CutsEditor";
+import ShotOverridesPanel from "./ShotOverridesPanel";
+import RenderPlanPanel from "./RenderPlanPanel";
+import LensRigPanel from "./LensRigPanel";
+import ConstraintsPanel from "./ConstraintsPanel";
+import CameraPathPanel from "./CameraPathPanel";
+import DopeSheetPanel from "./DopeSheetPanel";
+import ShotTimelinePanel from "./ShotTimelinePanel";
+import GraphEditorPanel from "./GraphEditorPanel";
 import KeyframeTable from "./KeyframeTable";
 import GraphEditor from "./GraphEditor";
 import AudioBeatGrid, { Beat } from "./AudioBeatGrid";
 import AudioWaveform from "./AudioWaveform";
 import StackEditor from "./StackEditor";
-import TimelineMarkers, { Marker, nearestSnapFrame } from "./TimelineMarkers";
+import TimelineMarkers, { Marker, nearestSnapFrame, SnapOptions } from "./TimelineMarkers";
+import SnapSettings from "./SnapSettings";
 
 const DEFAULT_BRIDGE = "http://127.0.0.1:8787";
 
@@ -29,6 +39,7 @@ export default function App() {
 
   // snapping
   const [snapEnabled, setSnapEnabled] = useState(true);
+  const [snapOptions, setSnapOptions] = useState<SnapOptions>({ radiusFrames: 3, priority: "closest", subdivision: 1, gridStep: 0 });
 
   // audio
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -43,7 +54,8 @@ export default function App() {
   }
 
   function exportJson() {
-    if (!project) return;
+    const prj = projectOverride ?? project;
+    if (!prj) return;
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -53,13 +65,14 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  async function refreshPreview() {
-    if (!project) return;
+  async function refreshPreview(projectOverride?: any) {
+    const prj = projectOverride ?? project;
+    if (!prj) return;
     setError(null);
     try {
-      const frames = project?.meta?.frames ?? 180;
+      const frames = prj?.meta?.frames ?? 180;
       const end = Math.min(frames - 1, 720);
-      const res = await evalRange(bridgeUrl, project, 0, end);
+      const res = await evalRange(bridgeUrl, prj, 0, end);
       setRangeData(res);
       setFrame((f) => Math.max(0, Math.min(end, f)));
     } catch (e: any) {
@@ -131,7 +144,7 @@ export default function App() {
   const fps = project?.meta?.fps ?? 24;
 
   const maxFrame = useMemo(() => {
-    const frames = project?.meta?.frames ?? 180;
+    const frames = prj?.meta?.frames ?? 180;
     const previewMax = rangeData?.frames?.length ? rangeData.frames.length - 1 : frames - 1;
     return Math.max(0, previewMax);
   }, [project, rangeData]);
@@ -182,7 +195,94 @@ export default function App() {
     setProject(p);
   }
 
-  function setMarkers(next: Marker[]) {
+  function ensureChannel(p: any, trackId: string, channelName: string) {
+  const idx = p.timeline.tracks.findIndex((t: any) => t.id === trackId);
+  if (idx < 0) return null;
+  p.timeline.tracks[idx].channels[channelName] = p.timeline.tracks[idx].channels[channelName] ?? {};
+  return p.timeline.tracks[idx].channels[channelName];
+}
+
+function upsertKey(p: any, trackId: string, channelName: string, t: number, v: number) {
+  const ch = ensureChannel(p, trackId, channelName);
+  if (!ch) return;
+
+  if (!ch.keys || !Array.isArray(ch.keys) || ch.keys.length === 0) {
+    const base = (typeof ch.value === "number") ? ch.value : v;
+    ch.value = null;
+    ch.keys = [
+      { t: 0, v: base, interp: "bezier" },
+      { t: t, v: v, interp: "bezier" }
+    ];
+    return;
+  }
+
+  const i = ch.keys.findIndex((k: any) => (k.t|0) === (t|0));
+  if (i >= 0) ch.keys[i] = { ...ch.keys[i], v };
+  else ch.keys.push({ t, v, interp: "bezier" });
+  ch.keys.sort((a: any, b: any) => (a.t|0) - (b.t|0));
+}
+function applyConstraintsPatch(next: any) {
+  if (!project) return;
+  const p = deepClone(project);
+  p.timeline = p.timeline || {};
+  p.timeline.camera_constraints = next;
+  setProject(p);
+  void refreshPreview(p);
+}
+
+
+function applyLensKeyframe(frame: number, patch: { fov_deg?: number; focus_distance?: number; fstop?: number }) {
+  if (!project) return;
+  const p = deepClone(project);
+  const trackId = "camera.lens";
+  const f = frame|0;
+  if (patch.fov_deg !== undefined) upsertKey(p, trackId, "fov_deg", f, patch.fov_deg);
+  if (patch.focus_distance !== undefined) upsertKey(p, trackId, "focus_distance", f, patch.focus_distance);
+  if (patch.fstop !== undefined) upsertKey(p, trackId, "fstop", f, patch.fstop);
+  setProject(p);
+  void refreshPreview(p);
+}
+
+function applyViewportKeyframe(f: number, payload: { position: [number, number, number]; target: [number, number, number] }) {
+  const trackId = camTrack?.id ?? "camera.transform";
+  const p = deepClone(project);
+
+  upsertKey(p, trackId, "position.x", f, payload.position[0]);
+  upsertKey(p, trackId, "position.y", f, payload.position[1]);
+  upsertKey(p, trackId, "position.z", f, payload.position[2]);
+
+  upsertKey(p, trackId, "target.x", f, payload.target[0]);
+  upsertKey(p, trackId, "target.y", f, payload.target[1]);
+  upsertKey(p, trackId, "target.z", f, payload.target[2]);
+
+  setProject(p);
+  void refreshPreview(p);
+}
+
+function setCuts(next: any[]) {
+  const p = deepClone(project);
+  p.timeline.cuts = next;
+  setProject(p);
+  setCutsState(next);
+}
+
+function setShotOverrides(next: any[]) {
+  const p = deepClone(project);
+  p.timeline.shots = next;
+  setProject(p);
+  setShotOverridesState(next);
+}
+
+function ensureMarkerCut(frame: number) {
+  const f = frame|0;
+  const existing = (markers ?? []).find(m => (m.frame|0)===f && (String(m.label||"").toLowerCase()==="cut"));
+  if (existing) return;
+  setMarkers([...(markers ?? []), { frame: f, label: "cut" }]);
+}
+
+
+function setMarkers(next: Marker[]) {
+
     const p = deepClone(project);
     p.timeline.markers = next;
     setProject(p);
@@ -197,7 +297,7 @@ export default function App() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "580px 1fr", height: "100vh", fontFamily: "system-ui" }}>
       <div style={{ padding: 12, borderRight: "1px solid #333", overflow: "auto" }}>
-        <h2 style={{ margin: "0 0 8px 0" }}>Deforum Next Editor (v6)</h2>
+        <h2 style={{ margin: "0 0 8px 0" }}>Deforum Next Editor (v18.1)</h2>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
           <label style={{ fontSize: 12, opacity: 0.85 }}>Bridge URL</label>
@@ -317,7 +417,7 @@ export default function App() {
       </div>
 
       <div style={{ position: "relative" }}>
-        <Viewport3D rangeData={rangeData} frame={frame} project={project} />
+        <Viewport3D rangeData={rangeData} frame={frame} project={project} onKeyframe={applyViewportKeyframe} />
         <div style={{ position: "absolute", left: 12, bottom: 12, fontSize: 12, padding: 8, background: "rgba(0,0,0,0.5)", color: "white" }}>
           {rangeData ? "Preview loaded" : "Click 'Refresh Preview' to evaluate camera path."}
         </div>

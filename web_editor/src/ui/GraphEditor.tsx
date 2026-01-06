@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { Marker, nearestSnapFrame } from "./TimelineMarkers";
+import { Marker, nearestSnapFrame, SnapOptions } from "./TimelineMarkers";
 
 type Key = any;
 
@@ -9,6 +9,7 @@ type Props = {
   onChange: (keys: Key[]) => void;
 
   snapEnabled?: boolean;
+  snapOptions?: SnapOptions;
   markers?: Marker[];
   beats?: { frame: number }[];
   maxFrame?: number;
@@ -21,7 +22,23 @@ function sortKeys(keys: Key[]) {
   return [...keys].sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
 }
 
-export default function GraphEditor({ channelName, keys, onChange, snapEnabled=false, markers=[], beats=[], maxFrame=100000 }: Props) {
+function pointInPoly(px: number, py: number, poly: {x:number,y:number}[]) {
+  // ray casting
+  let inside = false;
+  for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    const intersect = ((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / ((yj - yi) || 1e-9) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export default function GraphEditor({
+  channelName, keys, onChange,
+  snapEnabled=false, snapOptions={ radiusFrames: 3, priority: "closest", subdivision: 1, gridStep: 0 },
+  markers=[], beats=[], maxFrame=100000
+}: Props) {
   const W = 520, H = 240;
   const pad = 24;
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -35,7 +52,17 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
   const [dragPan, setDragPan] = useState<{x:number,y:number,ox:number,oy:number} | null>(null);
 
   const [box, setBox] = useState<{x0:number,y0:number,x1:number,y1:number} | null>(null);
-  const [dragGroup, setDragGroup] = useState<{ startX:number; startY:number; base: {t:number,v:number}[]; idxs:number[] } | null>(null);
+  const [lassoMode, setLassoMode] = useState(false);
+  const [lasso, setLasso] = useState<{ pts: {x:number,y:number}[] } | null>(null);
+
+  const [dragGroup, setDragGroup] = useState<{
+    startX:number; startY:number;
+    base: {t:number,v:number}[];
+    idxs:number[];
+    pivotT:number; pivotV:number;
+  } | null>(null);
+
+  const [lastSnap, setLastSnap] = useState<number | null>(null);
 
   const ks = useMemo(() => sortKeys(keys ?? []), [keys]);
 
@@ -83,7 +110,9 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
   function snapTIfNeeded(t: number) {
     const raw = clamp(Math.round(t), 0, maxFrame);
     if (!snapEnabled) return raw;
-    return nearestSnapFrame(raw, markers, beats as any, maxFrame, 3);
+    const snapped = nearestSnapFrame(raw, markers, beats as any, maxFrame, snapOptions);
+    if (snapped !== raw) setLastSnap(snapped);
+    return snapped;
   }
 
   function toggleSelect(idx: number, additive: boolean) {
@@ -103,7 +132,31 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
     setSelected(prev => Array.from(new Set([...prev, ...hits])));
   }
 
+  function setSelectionFromLasso(poly: {x:number,y:number}[], additive: boolean) {
+    if (poly.length < 3) return;
+    const hits: number[] = [];
+    ks.forEach((k, idx) => {
+      const x = tx(k.t), y = ty(k.v);
+      if (pointInPoly(x, y, poly)) hits.push(idx);
+    });
+    if (!additive) { setSelected(hits); return; }
+    setSelected(prev => Array.from(new Set([...prev, ...hits])));
+  }
+
   function updateKeys(next: any[]) { onChange(sortKeys(next)); }
+
+  function setEase(idx: number, ease: [number, number, number, number] | null) {
+  if (ease === null) updateKey(idx, { ease: null });
+  else updateKey(idx, { ease });
+}
+
+function presetToEase(name: string): [number, number, number, number] | null {
+  if (name === "linear") return [0.0, 0.0, 1.0, 1.0];
+  if (name === "easeIn") return [0.42, 0.0, 1.0, 1.0];
+  if (name === "easeOut") return [0.0, 0.0, 0.58, 1.0];
+  if (name === "easeInOut") return [0.42, 0.0, 0.58, 1.0];
+  return null;
+}
 
   function updateKey(idx: number, patch: any) {
     const next = deepClone(ks);
@@ -116,14 +169,41 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
   }
 
   function applyGroupDrag(ev: MouseEvent) {
-    if (!dragGroup || !svgRef.current) return;
+    if (!dragGroup) return;
+
     const dx = ev.clientX - dragGroup.startX;
     const dy = ev.clientY - dragGroup.startY;
 
-    const dt = invT(clamp((W/2)+dx, 0, W)) - invT(W/2);
-    const dv = invV(clamp((H/2)+dy, 0, H)) - invV(H/2);
+    // Convert pixel delta to data delta in t/v via center-relative inverse mapping.
+    let dt = invT(clamp((W/2)+dx, 0, W)) - invT(W/2);
+    let dv = invV(clamp((H/2)+dy, 0, H)) - invV(H/2);
+
+    // Axis locks:
+    // Shift => time-only; Ctrl => value-only (if both pressed, free)
+    if (ev.shiftKey && !ev.ctrlKey) dv = 0;
+    if (ev.ctrlKey && !ev.shiftKey) dt = 0;
 
     const next = deepClone(ks);
+
+    // Alt => scale around pivot (time+value)
+    if (ev.altKey) {
+      const sx = clamp(1.0 + (dx / 200.0), 0.05, 20.0);
+      const sy = clamp(1.0 - (dy / 200.0), 0.05, 20.0);
+
+      dragGroup.idxs.forEach((idx, j) => {
+        const bt0 = dragGroup.base[j].t;
+        const bv0 = dragGroup.base[j].v;
+
+        const bt = dragGroup.pivotT + (bt0 - dragGroup.pivotT) * sx;
+        const bv = dragGroup.pivotV + (bv0 - dragGroup.pivotV) * sy;
+
+        next[idx] = { ...next[idx], t: snapTIfNeeded(bt), v: bv };
+      });
+
+      updateKeys(next);
+      return;
+    }
+
     dragGroup.idxs.forEach((idx, j) => {
       const bt = dragGroup.base[j].t + dt;
       const bv = dragGroup.base[j].v + dv;
@@ -141,7 +221,10 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
 
     const idxs = (wasSelected ? selected : [idx]).slice().sort((a,b)=>a-b);
     const base = idxs.map(i => ({ t: ks[i].t ?? 0, v: ks[i].v ?? 0 }));
-    setDragGroup({ startX: e.clientX, startY: e.clientY, base, idxs });
+    const pivotT = ks[idxs[0]].t ?? 0;
+    const pivotV = ks[idxs[0]].v ?? 0;
+    setDragGroup({ startX: e.clientX, startY: e.clientY, base, idxs, pivotT, pivotV });
+    setLastSnap(null);
 
     function onMove(ev: MouseEvent) { applyGroupDrag(ev); }
     function onUp() {
@@ -215,7 +298,12 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
       const rect = svgRef.current.getBoundingClientRect();
       const x0 = clamp(e.clientX - rect.left, 0, W);
       const y0 = clamp(e.clientY - rect.top, 0, H);
-      setBox({ x0, y0, x1: x0, y1: y0 });
+
+      if (lassoMode) {
+        setLasso({ pts: [{x:x0,y:y0}] });
+      } else {
+        setBox({ x0, y0, x1: x0, y1: y0 });
+      }
       return;
     }
 
@@ -238,14 +326,30 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
       const x1 = clamp(e.clientX - rect.left, 0, W);
       const y1 = clamp(e.clientY - rect.top, 0, H);
       setBox({ ...box, x1, y1 });
+      return;
+    }
+    if (lasso && svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const x1 = clamp(e.clientX - rect.left, 0, W);
+      const y1 = clamp(e.clientY - rect.top, 0, H);
+      const pts = lasso.pts;
+      const last = pts[pts.length - 1];
+      const dx = x1 - last.x;
+      const dy = y1 - last.y;
+      if (dx*dx + dy*dy > 12) setLasso({ pts: [...pts, {x:x1,y:y1}] });
     }
   }
 
   function onMouseUp(e: React.MouseEvent) {
     if (dragPan) setDragPan(null);
+
     if (box) {
       setSelectionFromBox(box, e.shiftKey);
       setBox(null);
+    }
+    if (lasso) {
+      setSelectionFromLasso(lasso.pts, e.shiftKey);
+      setLasso(null);
     }
   }
 
@@ -256,6 +360,9 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
         <div style={{ fontWeight: 700 }}>Graph Editor: {channelName}</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={() => setLassoMode(v => !v)} style={{ opacity: lassoMode ? 1 : 0.7 }}>
+            {lassoMode ? "Lasso: ON" : "Lasso: OFF"}
+          </button>
           <label style={{ fontSize: 12, opacity: 0.85 }}>ZoomX</label>
           <input type="range" min={0.5} max={3} step={0.05} value={zoomX} onChange={(e)=>setZoomX(parseFloat(e.target.value))} />
           <label style={{ fontSize: 12, opacity: 0.85 }}>ZoomY</label>
@@ -286,6 +393,10 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
         </g>
 
         <path d={bezierPath()} fill="none" stroke="#66ccff" strokeWidth={2} />
+
+        {lastSnap !== null ? (
+          <line x1={tx(lastSnap)} y1={pad} x2={tx(lastSnap)} y2={H-pad} stroke="#ffcc66" opacity={0.5} strokeDasharray="4 3" />
+        ) : null}
 
         {ks.map((k, idx) => {
           const x = tx(k.t);
@@ -340,10 +451,19 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
             strokeWidth={1}
           />
         )}
+
+        {lasso && (
+          <path
+            d={lasso.pts.map((p, i) => `${i===0 ? "M":"L"} ${p.x} ${p.y}`).join(" ") + " Z"}
+            fill="rgba(102,204,255,0.08)"
+            stroke="rgba(102,204,255,0.9)"
+            strokeWidth={1}
+          />
+        )}
       </svg>
 
-      <div style={{ fontSize: 12, opacity: 0.8 }}>
-        Box-select: drag on background (Shift = additive). Move group: drag any selected point. Pan: right mouse or Alt-drag. Snap (drag): {snapEnabled ? "on" : "off"}.
+      <div style={{ fontSize: 12, opacity: 0.8, lineHeight: 1.35 }}>
+        Selection: Box-select (default) or Lasso (toggle). Move group: drag any selected key. Axis lock: <b>Shift</b>=time-only, <b>Ctrl</b>=value-only. <b>Alt</b>=scale around pivot (time+value). Pan: right mouse or Alt-drag. Snap: {snapEnabled ? "on" : "off"}.
       </div>
 
       {selected.length ? (
@@ -366,6 +486,30 @@ export default function GraphEditor({ channelName, keys, onChange, snapEnabled=f
                   <label style={{ fontSize: 12, opacity: 0.85 }}>
                     <input type="checkbox" checked={!!k.tan_lock} onChange={(e)=>setTangentLocked(idx,e.target.checked)} /> tangent lock
                   </label>
+<label style={{ fontSize: 12, opacity: 0.85 }}>Ease preset</label>
+<select
+  value={k.ease ? "custom" : "none"}
+  onChange={(e) => {
+    const v = e.target.value;
+    if (v === "none") setEase(idx, null);
+    else if (v === "custom") setEase(idx, k.ease ?? [0.42, 0.0, 0.58, 1.0]);
+  }}
+>
+  <option value="none">None</option>
+  <option value="custom">Custom</option>
+</select>
+
+{k.ease ? (
+  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <span style={{ fontSize: 12, opacity: 0.75 }}>cubic-bezier</span>
+    <input type="number" min={0} max={1} step={0.01} value={k.ease[0]} onChange={(e)=>setEase(idx, [parseFloat(e.target.value)||0, k.ease[1], k.ease[2], k.ease[3]])} style={{ width: 70 }} />
+    <input type="number" min={0} max={1} step={0.01} value={k.ease[1]} onChange={(e)=>setEase(idx, [k.ease[0], parseFloat(e.target.value)||0, k.ease[2], k.ease[3]])} style={{ width: 70 }} />
+    <input type="number" min={0} max={1} step={0.01} value={k.ease[2]} onChange={(e)=>setEase(idx, [k.ease[0], k.ease[1], parseFloat(e.target.value)||0, k.ease[3]])} style={{ width: 70 }} />
+    <input type="number" min={0} max={1} step={0.01} value={k.ease[3]} onChange={(e)=>setEase(idx, [k.ease[0], k.ease[1], k.ease[2], parseFloat(e.target.value)||0])} style={{ width: 70 }} />
+    <button onClick={() => setEase(idx, presetToEase("easeInOut"))}>Preset: easeInOut</button>
+  </div>
+) : null}
+
                 </div>
               </div>
             );
